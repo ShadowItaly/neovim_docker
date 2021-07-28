@@ -1,0 +1,24 @@
+FROM testcab/yay
+RUN sudo pacman -Syu --noconfirm --needed neovim git gcc wget zsh python3 python-pip nodejs ripgrep tmux github-cli openssh thefuck
+RUN sudo wget --directory-prefix=/tmp https://github.com/charmbracelet/glow/releases/download/v1.4.1/glow_1.4.1_linux_x86_64.tar.gz && sudo tar -xvf /tmp/glow_1.4.1_linux_x86_64.tar.gz --directory /tmp && sudo mv /tmp/glow /usr/bin
+RUN sudo ln -snf /usr/share/zoneinfo/$TZ /etc/localtime
+USER root
+RUN sudo echo $TZ > /etc/timezone
+USER makepkg
+RUN pip3 install neovim
+RUN pip install neovim
+RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+RUN git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-/home/makepkg/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
+RUN git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-/home/makepkg/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
+ADD --chown=makepkg ./.zshrc /home/makepkg/.zshrc
+RUN git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf
+RUN ~/.fzf/install --all
+RUN sh -c 'curl -fLo "${XDG_DATA_HOME:-/home/makepkg/.local/share}"/nvim/site/autoload/plug.vim --create-dirs https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim'
+RUN mkdir help
+ADD --chown=makepkg ./help.md /home/makepkg/help/help.md
+RUN git clone --depth=1 https://github.com/romkatv/powerlevel10k.git ${ZSH_CUSTOM:-/home/makepkg/.oh-my-zsh/custom}/themes/powerlevel10k
+ADD --chown=makepkg ./init.vim /home/makepkg/.config/nvim/init.vim
+ADD --chown=makepkg ./.p10k.zsh /home/makepkg/.p10k.zsh
+RUN echo "set-option -g default-shell /bin/zsh" > /home/makepkg/.tmux.conf
+RUN nvim +PlugInstall +qall
+CMD /bin/zsh
