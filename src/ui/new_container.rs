@@ -22,7 +22,14 @@ enum CurrentPhase {
     EntryCommand,
     AddSSHKeys,
     GitConfig,
-    AutoRemove
+    AutoRemove,
+    WorkingDirectory,
+}
+
+enum WorkingDirectorySetup {
+    MountDirectory(String),
+    CopyDirectory(String),
+    DontUse,
 }
 
 pub struct AppNewContainerContext {
@@ -32,6 +39,7 @@ pub struct AppNewContainerContext {
     import_keys: String,
     git_config: String,
     image_name: String,
+    working_dir: WorkingDirectorySetup,
     phase: CurrentPhase,
 }
 
@@ -44,6 +52,7 @@ impl AppNewContainerContext {
             import_keys: String::from("yes"),
             git_config: String::from("yes"),
             entry_command: String::from("/bin/zsh"),
+            working_dir: WorkingDirectorySetup::MountDirectory(std::env::current_dir().unwrap().to_str().unwrap().to_string()),
             phase: CurrentPhase::SelectName,
         }
     }
@@ -52,7 +61,7 @@ impl AppNewContainerContext {
         terminal.draw(|f| {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Length(1),Constraint::Length(3),Constraint::Length(3),Constraint::Length(3),Constraint::Length(3),Constraint::Length(3),Constraint::Length(3),Constraint::Length(3)].as_ref())
+                .constraints([Constraint::Length(1),Constraint::Length(3),Constraint::Length(3),Constraint::Length(3),Constraint::Length(3),Constraint::Length(3),Constraint::Length(3),Constraint::Length(3),Constraint::Length(3)].as_ref())
                 .split(f.size());
 
             let mut style_non = Style::default().fg(Color::Blue);
@@ -131,12 +140,36 @@ impl AppNewContainerContext {
             });
             f.render_widget(use_git_config,chunks[5]);
 
+            let mut path = match &self.working_dir {
+                WorkingDirectorySetup::MountDirectory(x) => {
+                    Paragraph::new(Span::raw(format!(">> {}",&x)))
+                                    .alignment(Alignment::Left)
+                                    .block(Block::default().borders(Borders::ALL).title("Mount this path inside the container: "))
+                },
+                WorkingDirectorySetup::CopyDirectory(x) => {
+                    Paragraph::new(Span::raw(format!(">> {}",&x)))
+                                    .alignment(Alignment::Left)
+                                    .block(Block::default().borders(Borders::ALL).title("Copy this path inside the container: "))
+                },
+                _ => {
+                    Paragraph::new(Span::raw(">> --/--"))
+                                    .alignment(Alignment::Left)
+                                    .block(Block::default().borders(Borders::ALL).title("Neither mount nor copy working dir"))
+                }
+            };
+
+            path = path.style(match self.phase {
+                CurrentPhase::WorkingDirectory => {style_hi.clone()},
+                _ => style_non.clone()
+            });
+            f.render_widget(path,chunks[7]);
+
 
 
             let help = Paragraph::new(Text::from("Ctrl+h - Show full help")).style(style_help)
                                     .block(Block::default().borders(Borders::ALL).title("Help"))
                                     .alignment(Alignment::Left);
-            f.render_widget(help,chunks[7]);
+            f.render_widget(help,chunks[8]);
 
             if popup.is_some() {
                 popup.unwrap().render_on(f);
@@ -166,6 +199,11 @@ impl AppNewContainerContext {
             CurrentPhase::SelectImage => {
                 terminal.show_cursor().unwrap();
                 terminal.set_cursor(self.image_name.len() as u16+4,17).unwrap();
+            },
+            CurrentPhase::WorkingDirectory => {
+                terminal.show_cursor().unwrap();
+                let len = match &self.working_dir {WorkingDirectorySetup::MountDirectory(x)=>x.len(),WorkingDirectorySetup::CopyDirectory(x)=>x.len(),_ => 5};
+                terminal.set_cursor(len as u16+4,20).unwrap();
             },
         }
     }
@@ -225,6 +263,14 @@ impl AppNewContainerContext {
                         },
                         CurrentPhase::SelectImage => {
                             if r == '\n' || r == '\t'{
+                                self.phase = CurrentPhase::WorkingDirectory;
+                            }
+                            else {
+                                self.image_name.push(r);
+                            }
+                        },
+                        CurrentPhase::WorkingDirectory => {
+                            if r == '\n' {
                                 let timezone = format!("TZ={}",std::fs::read_to_string("/etc/timezone").unwrap().trim());
                                 let opts = ContainerOptions::builder(&self.image_name).auto_remove(self.auto_remove != "no").name(&(String::from("dde_")+&self.container_name)).cmd(self.entry_command.split(" ").collect()).tty(true).env(vec![&timezone]).attach_stdin(true).attach_stderr(true).attach_stdout(true).build();
                                 let info = docker.containers().create(&opts).await.unwrap();
@@ -259,8 +305,12 @@ impl AppNewContainerContext {
 
                                 return AppState::Search;
                             }
-                            else {
-                                self.image_name.push(r);
+                            if r == '\t' {
+                                match &self.working_dir {
+                                    WorkingDirectorySetup::MountDirectory(x) => {self.working_dir = WorkingDirectorySetup::CopyDirectory(x.clone());}
+                                    WorkingDirectorySetup::CopyDirectory(_) => {self.working_dir = WorkingDirectorySetup::DontUse;}
+                                    _ => {self.working_dir = WorkingDirectorySetup::MountDirectory(std::env::current_dir().unwrap().to_str().unwrap().to_string());}
+                                }
                             }
                         }
                     }
@@ -284,6 +334,13 @@ impl AppNewContainerContext {
                         },
                         CurrentPhase::SelectImage => {
                             self.image_name.pop();
+                        },
+                        CurrentPhase::WorkingDirectory => {
+                            match &mut self.working_dir {
+                                WorkingDirectorySetup::MountDirectory(x) => {x.pop();},
+                                WorkingDirectorySetup::CopyDirectory(x) => {x.pop();},
+                                _ => {}    
+                            };
                         }
                     }
                 },
