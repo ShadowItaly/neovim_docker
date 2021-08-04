@@ -82,7 +82,8 @@ impl AppPopupContext {
     pub fn render_on<B: Backend>(&mut self, f: &mut Frame<B>) {
         let popup_layout = AppPopupContext::centered_rect(80, 20, f.size());
         let block = Paragraph::new(Span::raw(&self.message)).block(Block::default().title(" Popup message ").borders(Borders::ALL).style(self.style).border_type(BorderType::Double)).style(self.style).wrap(Wrap { trim: true }).alignment(Alignment::Center);
-        f.render_widget(Clear, popup_layout);
+        let bigger_rect = Rect::new(popup_layout.x-1,popup_layout.y-1,popup_layout.width+2,popup_layout.height+2);
+        f.render_widget(Clear, bigger_rect);
         f.render_widget(block, popup_layout);
     }
 

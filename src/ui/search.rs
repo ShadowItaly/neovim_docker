@@ -13,7 +13,8 @@ use termion::input::TermRead;
 use crate::ui::AppState;
 use crate::ui::popup::AppPopupContext;
 use std::process::Command;
-use termion::raw::IntoRawMode;
+use termion::raw::{IntoRawMode};
+use termion::screen::{ToAlternateScreen,ToMainScreen};
 use crate::VERSION;
 
 struct ContainerList {
@@ -29,7 +30,7 @@ impl ContainerList {
         self.containers = val.list(&opts).await.unwrap();
         self.containers.retain(|x| {
             for name in x.names.iter() {
-                if name.starts_with("/dde_") {
+                if name.starts_with("/") {
                     return true;
                 }
             }
@@ -79,40 +80,80 @@ impl ContainerList {
         self.containers.len()
     }
 
-    pub fn as_gui_element<'a>(&'a mut self, _search: &str) -> (Vec<ListItem>,&'a mut ListState) {
+    pub fn get_expanded_string(&self, idx: usize) -> String {
+        if self.filtered_list.len() < 9 {
+            return idx.to_string();
+        }
+        else if self.filtered_list.len() < 98 {
+            if idx < 10 {
+                return String::from("0")+&idx.to_string();
+            }
+            else {
+                return idx.to_string();
+            }
+        }
+        panic!("At the moment only up to 100 container supported!");
+    }
+
+    pub fn get_selected_by_string(&self, selection: &str) -> Vec<usize> {
+        let mut results = Vec::new();
+        for x in 0..self.filtered_list.len()+1 {
+            if self.get_expanded_string(x).starts_with(selection) {
+                results.push(x);
+            }
+        }
+        results 
+    }
+
+    pub fn as_gui_element<'a>(&'a mut self, _search: &str, selection: &'a str) -> (Vec<ListItem>,&'a mut ListState) {
         let mut item_list = self.filtered_list.iter().enumerate().map(|(idx,x)| { 
+            let result = self.get_expanded_string(idx);
             let status = if self.containers[*x].state == "running" {
                 Span::styled("[RUNNING]",Style::default().fg(Color::Green))
             }
             else {
                 Span::styled("[STOPPED]",Style::default().fg(Color::Red))
             };
-            ListItem::new(Spans::from(vec![Span::raw(format!("{}. ",idx.to_string())),Span::raw(self.containers[*x].names[0].clone()),Span::raw(" - "),status]))
+            let index = if result.starts_with(selection) {
+                vec![Span::styled(selection, Style::default().fg(Color::LightYellow).add_modifier(Modifier::BOLD)),Span::raw(format!("{}. ",&result[selection.len()..])),Span::raw(self.containers[*x].names[0].clone()),Span::raw(" - "),status]
+            }
+            else {
+                vec![Span::raw(format!("{}. ",result)),Span::raw(self.containers[*x].names[0].clone()),Span::raw(" - "),status]
+            };
+            ListItem::new(Spans::from(index))
             }).collect::<Vec<ListItem>>();
 
-            item_list.push(ListItem::new(Spans::from(vec![Span::raw(format!("{}. ",self.filtered_list.len())),Span::raw("Create new container development environment")])));
-        (item_list,&mut self.selected_state)
+            let idx = self.get_expanded_string(self.filtered_list.len());
+            let index = if idx.starts_with(selection) {
+                vec![Span::styled(selection, Style::default().fg(Color::LightYellow).add_modifier(Modifier::BOLD)),Span::raw(format!("{}. ",&idx[selection.len()..])),Span::raw("Create new container development environment")]
+            }
+            else {
+                vec![Span::raw(format!("{}. ",idx)),Span::raw("Create new container development environment")]
+            };
+
+            item_list.push(ListItem::new(Spans::from(index)));
+            (item_list,&mut self.selected_state)
     }
 }
 
 enum CurrentState {
     EnteringSearch,
-    SelectingOption
+    SelectingOption,
+    CommandMode,
 }
 
 pub struct AppSearchContext {
     container_list: ContainerList,
     search_term: String,
+    current_selection: String,
     current_state: CurrentState,
 }
 
 async fn attach_to_container(id: &str) {
     let args = vec!["attach",id,"--detach-keys","ctrl-d"];
-    let stdout = io::stdout().into_raw_mode().unwrap();
-    stdout.suspend_raw_mode().unwrap();
+    println!("{}",ToMainScreen);
     Command::new("docker").args(args).spawn().unwrap().wait().unwrap();
-    stdout.activate_raw_mode().unwrap();
-    std::mem::forget(stdout);
+    println!("{}",ToAlternateScreen);
 }
 
 impl AppSearchContext{ 
@@ -123,8 +164,9 @@ impl AppSearchContext{
                 filtered_list: Vec::new(),
                 selected_state: ListState::default(),
             },
+            current_selection: String::new(),
             search_term: String::new(),
-            current_state: CurrentState::EnteringSearch,
+            current_state: CurrentState::CommandMode,
         }
     }
 
@@ -171,8 +213,8 @@ impl AppSearchContext{
             f.render_widget(header_paragraph,chunks[0]);
             f.render_widget(paragraph,chunks[1]);
 
-            let (result,state) = self.container_list.as_gui_element(&self.search_term);
-            let mut block = Block::default().borders(Borders::ALL).title(" w - up, s - down");
+            let (result,state) = self.container_list.as_gui_element(&self.search_term,&self.current_selection);
+            let mut block = Block::default().borders(Borders::ALL).title(format!("Selection: {}",&self.current_selection));
             block = match self.current_state {
                 CurrentState::SelectingOption => block.style(style_hi),
                 _ => block.style(style_non)
@@ -182,7 +224,14 @@ impl AppSearchContext{
                 .block(block)
                 .style(style_non)
                 .highlight_style(list_highlight_style).highlight_symbol(">> ");
-            f.render_stateful_widget(container,chunks[2],state);
+            match self.current_state {
+                CurrentState::SelectingOption => {
+                    f.render_stateful_widget(container,chunks[2],state);
+                },
+                _ => {
+                    f.render_widget(container, chunks[2]);
+                }
+            }
 
             let help = match self.current_state {
                 CurrentState::EnteringSearch => {
@@ -192,6 +241,11 @@ impl AppSearchContext{
                 },
                 CurrentState::SelectingOption => {
                     Paragraph::new(Text::from("Select container: accept - <enter>; back to name field - <esc>; quit - <ctrl-c>; w - up; s - down")).style(style_help)
+                                    .block(Block::default().borders(Borders::ALL).title("Help"))
+                                    .alignment(Alignment::Left)
+                },
+                CurrentState::CommandMode => {
+                    Paragraph::new(Text::from("/ : Enter search mode, 0-9 : Select container, <space> : Select container")).style(style_help)
                                     .block(Block::default().borders(Borders::ALL).title("Help"))
                                     .alignment(Alignment::Left)
                 }
@@ -208,6 +262,7 @@ impl AppSearchContext{
     pub async fn event_loop<B: Backend>(&mut self, term: &mut Terminal<B>, docker: &Docker) -> AppState {
         self.update(docker).await;
         self.container_list.update_filtered_list(&self.search_term);
+        self.current_selection.clear();
 
         let stdin = io::stdin();
         self.render(term,None);
@@ -217,13 +272,61 @@ impl AppSearchContext{
                     match self.current_state {
                         CurrentState::EnteringSearch => {
                             if r == '\n' {
-                                self.current_state = CurrentState::SelectingOption;
+                                self.current_state = CurrentState::CommandMode;
                             }
                             else {
                                 self.search_term.push(r);
                                 self.container_list.update_filtered_list(&self.search_term);
                             }
                         },
+                        CurrentState::CommandMode => {
+                            if r == '/' {
+                                self.current_state = CurrentState::EnteringSearch;
+                            }
+                            else if r == 'q' {
+                                return AppState::Exiting;
+                            }
+                            else if r >= '0' && r <= '9' {
+                                self.current_selection.push(r);
+                                let num_results = self.container_list.get_selected_by_string(&self.current_selection);
+                                if num_results.len() == 0 {
+                                    self.current_selection.clear();
+                                }
+                                else if num_results.len() == 1 {
+                                    let mut selected = num_results[0];
+                                    if selected == self.container_list.filtered_list.len() {
+                                        return AppState::NewContainer;
+                                    }
+                                    else {
+                                        selected = self.container_list.filtered_list[selected];
+                                        let cont = self.container_list.containers.iter().filter_map(|x| if &x.names[0] == &self.container_list.containers[selected].names[0] { Some(&x.id) } else { None }).collect::<Vec<&String>>();
+                                        let container = docker.containers().get(cont[0]);
+                                        if let Ok(inspection) = container.inspect().await {
+                                            if inspection.state.running {
+                                                attach_to_container(cont[0]).await;
+                                                term.clear().unwrap();
+                                            }
+                                            else {
+                                                //Start it
+                                                container.start().await.unwrap();
+                                                attach_to_container(cont[0]).await;
+                                                term.clear().unwrap();
+                                            }
+                                            self.container_list.update(&docker).await;
+                                            self.search_term.clear();
+                                            self.current_selection.clear();
+                                            self.container_list.update_filtered_list(&self.search_term);
+                                        }
+                                        else {
+                                            AppPopupContext::new("An error occured press any key to continue".to_owned()).style(Style::default().fg(Color::LightRed)).event_render_loop(|popup| self.render(term, Some(popup)));
+                                        }
+                                    }
+                                }
+                            }
+                            else if r == ' ' {
+                                self.current_state = CurrentState::SelectingOption;
+                            }
+                        }
                         CurrentState::SelectingOption => {
                             if r == 'w' {
                                 self.container_list.select_last();
@@ -261,11 +364,12 @@ impl AppSearchContext{
                                 }
                             }
                             else if r == '\n' || r == '\t' {
-                                let selected = self.container_list.get_selected();
-                                if selected == self.container_list.containers.len() {
+                                let mut selected = self.container_list.get_selected();
+                                if selected == self.container_list.filtered_list.len() {
                                     return AppState::NewContainer;
                                 }
                                 else {
+                                    selected = self.container_list.filtered_list[selected];
                                     let cont = self.container_list.containers.iter().filter_map(|x| if &x.names[0] == &self.container_list.containers[selected].names[0] { Some(&x.id) } else { None }).collect::<Vec<&String>>();
                                     let container = docker.containers().get(cont[0]);
                                     if let Ok(inspection) = container.inspect().await {
@@ -281,6 +385,7 @@ impl AppSearchContext{
                                         }
                                         self.container_list.update(&docker).await;
                                         self.search_term.clear();
+                                        self.current_selection.clear();
                                         self.container_list.update_filtered_list(&self.search_term);
                                     }
                                     else {
@@ -301,7 +406,8 @@ impl AppSearchContext{
                     }
                 },
                 Ok(Key::Esc) => {
-                    self.current_state = CurrentState::EnteringSearch;
+                    self.current_state = CurrentState::CommandMode;
+                    self.current_selection.clear();
                 },
                 Ok(Key::Ctrl('c')) => {
                     return AppState::Exiting;

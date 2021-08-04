@@ -1,11 +1,11 @@
-use shiplift::{Docker,ImageListOptions,ContainerOptions};
+use shiplift::{Docker,ContainerOptions};
 use std::io;
 use tui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout,Alignment},
     style::{Color,Style,Modifier},
     text::{Span,Text,Spans},
-    widgets::{Block, Borders, Paragraph,List, ListItem,ListState},
+    widgets::{Block, Borders, Paragraph},
     Terminal,
 };
 use termion::event::Key;
@@ -31,9 +31,8 @@ pub struct AppNewContainerContext {
     entry_command: String,
     import_keys: String,
     git_config: String,
-    image_names: Vec<String>,
+    image_name: String,
     phase: CurrentPhase,
-    list_state: ListState,
 }
 
 impl AppNewContainerContext { 
@@ -41,12 +40,11 @@ impl AppNewContainerContext {
         AppNewContainerContext { 
             container_name: String::new(),
             auto_remove: String::from("no"),
-            image_names: Vec::new(),
+            image_name: String::from("shadowitaly/neovim_arch"),
             import_keys: String::from("yes"),
             git_config: String::from("yes"),
             entry_command: String::from("/bin/zsh"),
             phase: CurrentPhase::SelectName,
-            list_state: ListState::default(),
         }
     }
 
@@ -54,15 +52,14 @@ impl AppNewContainerContext {
         terminal.draw(|f| {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Length(1),Constraint::Length(3),Constraint::Length(3),Constraint::Length(3),Constraint::Length(3),Constraint::Length(3),Constraint::Min(1),Constraint::Length(3)].as_ref())
+                .constraints([Constraint::Length(1),Constraint::Length(3),Constraint::Length(3),Constraint::Length(3),Constraint::Length(3),Constraint::Length(3),Constraint::Length(3),Constraint::Length(3)].as_ref())
                 .split(f.size());
 
             let mut style_non = Style::default().fg(Color::Blue);
             let mut style_hi = Style::default().fg(Color::LightGreen);
             let mut header_style = Style::default().fg(Color::LightRed);
             let mut header_other_style = Style::default().bg(Color::Black).fg(Color::LightYellow);
-            let mut listhighlight_style = Style::default().fg(Color::LightYellow);
-            let mut style_help = Style::default().fg(Color::Cyan);
+            let style_help = Style::default().fg(Color::Cyan);
 
             if popup.is_some() {
                 let dim_style = Style::default().fg(Color::Gray).add_modifier(Modifier::DIM);
@@ -70,8 +67,6 @@ impl AppNewContainerContext {
                 style_hi = dim_style;
                 header_style = dim_style;
                 header_other_style = dim_style;
-                listhighlight_style = dim_style;
-                style_help = dim_style;
             }
 
             let header_paragraph = Paragraph::new(Spans::from(vec![Span::styled(VERSION,header_style),Span::raw(" | New container creation")]))
@@ -88,14 +83,17 @@ impl AppNewContainerContext {
             });
 
 
-            let mut list = List::new(self.image_names.iter().map(|x| ListItem::new(Span::raw(x))).collect::<Vec<ListItem>>()).block(Block::default().borders(Borders::ALL).title(" From which image (w - up, s - down)")).highlight_style(listhighlight_style).highlight_symbol(">> ");
-            list = list.style(match self.phase {
+            let mut image_name = Paragraph::new(Span::raw(format!(">> {}",&self.image_name)))
+                                    .alignment(Alignment::Left)
+                                    .block(Block::default().borders(Borders::ALL).title("Enter the image name"));
+ 
+            image_name = image_name.style(match self.phase {
                 CurrentPhase::SelectImage => style_hi.clone(),
                 _ => style_non.clone()
             });
             f.render_widget(header_paragraph,chunks[0]);
             f.render_widget(paragraph,chunks[1]);
-            f.render_stateful_widget(list,chunks[6],&mut self.list_state);
+            f.render_widget(image_name,chunks[6]);
 
             let mut remove = Paragraph::new(Span::raw(format!(">> {}",&self.auto_remove)))
                                     .alignment(Alignment::Left)
@@ -165,28 +163,16 @@ impl AppNewContainerContext {
                 terminal.show_cursor().unwrap();
                 terminal.set_cursor(self.git_config.len() as u16+4,14).unwrap();
             },
-            _ => {terminal.hide_cursor().unwrap();},
+            CurrentPhase::SelectImage => {
+                terminal.show_cursor().unwrap();
+                terminal.set_cursor(self.image_name.len() as u16+4,17).unwrap();
+            },
         }
     }
 
     pub async fn event_loop<B: Backend>(&mut self, term: &mut Terminal<B>,docker: &Docker) -> AppState {
         let stdin = io::stdin();
-        let opts = ImageListOptions::builder().all().build();
-        self.image_names = docker.images().list(&opts).await.unwrap().iter().filter_map(|x| {
-            if let Some(labels) = &x.repo_tags {
-                for label in labels.iter() {
-                    if label != "<none>:<none>" {
-                        if label.starts_with("dde_") {
-                            return Some(format!("{}",label));
-                        }
-                    }
-                }
-            }
-            None
-        }).collect();
-        if self.image_names.len() > 0 {
-            self.list_state.select(Some(0));
-        }
+
         self.render(term,None);
         for evt in stdin.keys() {
             match evt {
@@ -237,30 +223,10 @@ impl AppNewContainerContext {
                                 self.git_config.push(r);
                             }
                         },
-                        _ => {
-                            if r == 's' {
-                                if let Some(mut idx) = self.list_state.selected() {
-                                    idx+=1;
-                                    if idx >= self.image_names.len() {
-                                        idx = 0;
-                                    }
-                                    self.list_state.select(Some(idx));
-                                }
-                            }
-                            else if r == 'w' {
-                                if let Some(mut idx) = self.list_state.selected() {
-                                    if idx >= 1 {
-                                        idx -= 1;
-                                    }
-                                    else {
-                                        idx = self.image_names.len()-1;
-                                    }
-                                    self.list_state.select(Some(idx));
-                                }
-                            }
-                            else if r == '\n' {
+                        CurrentPhase::SelectImage => {
+                            if r == '\n' || r == '\t'{
                                 let timezone = format!("TZ={}",std::fs::read_to_string("/etc/timezone").unwrap().trim());
-                                let opts = ContainerOptions::builder(&self.image_names[self.list_state.selected().unwrap()]).auto_remove(self.auto_remove != "no").name(&(String::from("dde_")+&self.container_name)).cmd(self.entry_command.split(" ").collect()).tty(true).env(vec![&timezone]).attach_stdin(true).attach_stderr(true).attach_stdout(true).build();
+                                let opts = ContainerOptions::builder(&self.image_name).auto_remove(self.auto_remove != "no").name(&(String::from("dde_")+&self.container_name)).cmd(self.entry_command.split(" ").collect()).tty(true).env(vec![&timezone]).attach_stdin(true).attach_stderr(true).attach_stdout(true).build();
                                 let info = docker.containers().create(&opts).await.unwrap();
                                 let container = info.id;
                                 if self.import_keys == "yes" {
@@ -293,7 +259,10 @@ impl AppNewContainerContext {
 
                                 return AppState::Search;
                             }
-                        },
+                            else {
+                                self.image_name.push(r);
+                            }
+                        }
                     }
                 },
                 Ok(Key::Backspace) => {
@@ -313,7 +282,9 @@ impl AppNewContainerContext {
                         CurrentPhase::GitConfig => {
                             self.git_config.pop();
                         },
-                        _ => {},
+                        CurrentPhase::SelectImage => {
+                            self.image_name.pop();
+                        }
                     }
                 },
                 Ok(Key::Ctrl('c')) => {
