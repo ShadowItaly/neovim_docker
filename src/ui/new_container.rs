@@ -271,8 +271,20 @@ impl AppNewContainerContext {
                         },
                         CurrentPhase::WorkingDirectory => {
                             if r == '\n' {
+                                let mut activate_copy = String::new();
                                 let timezone = format!("TZ={}",std::fs::read_to_string("/etc/timezone").unwrap().trim());
-                                let opts = ContainerOptions::builder(&self.image_name).auto_remove(self.auto_remove != "no").name(&(String::from("dde_")+&self.container_name)).cmd(self.entry_command.split(" ").collect()).tty(true).env(vec![&timezone]).attach_stdin(true).attach_stderr(true).attach_stdout(true).build();
+                                let container_name = String::from("dde_")+&self.container_name;
+                                let mut outer_string = String::new();
+                                let volumes:Vec<&str> = match &self.working_dir {
+                                    WorkingDirectorySetup::MountDirectory(x) => {
+                                        outer_string=x.clone()+":/home/makepkg/mounted";
+                                        vec![&outer_string]
+                                    },
+                                    WorkingDirectorySetup::CopyDirectory(x) => {activate_copy = x.clone(); Vec::new()},
+                                    _ => {Vec::new()}
+                                };
+                                let opts = ContainerOptions::builder(&self.image_name).auto_remove(self.auto_remove != "no").name(&container_name).cmd(self.entry_command.split(" ").collect()).tty(true).env(vec![&timezone]).attach_stdin(true).attach_stderr(true).attach_stdout(true).volumes(volumes).build();
+
                                 let info = docker.containers().create(&opts).await.unwrap();
                                 let container = info.id;
                                 if self.import_keys == "yes" {
