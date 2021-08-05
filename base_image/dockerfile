@@ -1,0 +1,27 @@
+FROM archlinux/archlinux:latest
+RUN pacman -Syu --noconfirm --needed git gcc wget zsh python3 python-pip nodejs ripgrep tmux github-cli openssh thefuck
+RUN wget --directory-prefix=/tmp https://github.com/charmbracelet/glow/releases/download/v1.4.1/glow_1.4.1_linux_x86_64.tar.gz && tar -xvf /tmp/glow_1.4.1_linux_x86_64.tar.gz --directory /tmp && mv /tmp/glow /usr/bin
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime
+RUN echo $TZ > /etc/timezone
+RUN wget https://github.com/neovim/neovim/releases/download/nightly/nvim.appimage && chmod u+x nvim.appimage && ./nvim.appimage --appimage-extract && ln -s ~/squashfs-root/usr/bin/nvim /bin/nvim
+RUN pip3 install neovim
+RUN pip install neovim
+RUN pip install conan
+RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+RUN git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-/root/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
+RUN git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-/root/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
+RUN git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf
+RUN ~/.fzf/install --all
+RUN sh -c 'curl -fLo "${XDG_DATA_HOME:-/root/.local/share}"/nvim/site/autoload/plug.vim --create-dirs https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim'
+RUN mkdir /root/help
+RUN git clone https://github.com/ShadowItaly/neovim_arch_base_cfg /cont_cfg
+RUN mkdir /root/.config
+RUN mkdir /root/.config/nvim
+RUN ln -s /cont_cfg/init.vim /root/.config/nvim/init.vim
+RUN ln -s /cont_cfg/help.md /root/help/help.md
+RUN rm /root/.zshrc
+RUN ln -s /cont_cfg/.zshrc /root/.zshrc
+RUN ln -s /cont_cfg/.p10k.zsh /root/.p10k.zsh
+RUN git clone --depth=1 https://github.com/romkatv/powerlevel10k.git ${ZSH_CUSTOM:-/root/.oh-my-zsh/custom}/themes/powerlevel10k
+RUN echo "set-option -g default-shell /bin/zsh" > /root/.tmux.conf
+CMD /bin/zsh

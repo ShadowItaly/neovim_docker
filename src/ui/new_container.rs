@@ -276,7 +276,7 @@ impl AppNewContainerContext {
                                 let container_name = String::from("dde_")+&self.container_name;
                                 let mut volumes:Vec<String> = match &self.working_dir {
                                     WorkingDirectorySetup::MountDirectory(x) => {
-                                        let outer_string=x.clone()+":/home/makepkg/mounted:Z";
+                                        let outer_string=x.clone()+":/root/mounted:Z";
                                         vec![outer_string]
                                     },
                                     WorkingDirectorySetup::CopyDirectory(_) => {Vec::new()},
@@ -284,11 +284,11 @@ impl AppNewContainerContext {
                                 };
                                 if self.import_keys == "yes" {
                                     let home_dir = home::home_dir().unwrap().join(".ssh").to_str().unwrap().to_string();
-                                    volumes.push(home_dir+":/home/makepkg/.ssh:Z");
+                                    volumes.push(home_dir+":/root/.ssh:Z");
                                 }
                                 if self.git_config == "yes" {
                                     let home_dir = home::home_dir().unwrap().join(".gitconfig").to_str().unwrap().to_string();
-                                    volumes.push(home_dir+":/home/makepkg/.gitconfig:Z");
+                                    volumes.push(home_dir+":/root/.gitconfig:Z");
                                 }
                                 let opts = ContainerOptions::builder(&self.image_name).auto_remove(self.auto_remove != "no").name(&container_name).cmd(self.entry_command.split(" ").collect()).tty(true).env(vec![&timezone]).attach_stdin(true).attach_stderr(true).attach_stdout(true).volumes(volumes.iter().map(|x| &x[..]).collect()).build();
 

@@ -26,7 +26,6 @@ impl AppCommandContext {
     }
 
     pub fn render<B: Backend>(&mut self,terminal: &mut Terminal<B>) {
-        //FIX: allright :D
         terminal.draw(|f| {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)

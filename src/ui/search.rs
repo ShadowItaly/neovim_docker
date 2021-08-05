@@ -13,7 +13,6 @@ use termion::input::TermRead;
 use crate::ui::AppState;
 use crate::ui::popup::AppPopupContext;
 use std::process::Command;
-use termion::raw::{IntoRawMode};
 use termion::screen::{ToAlternateScreen,ToMainScreen};
 use crate::VERSION;
 
@@ -285,6 +284,9 @@ impl AppSearchContext{
                             }
                             else if r == 'q' {
                                 return AppState::Exiting;
+                            }
+                            else if r == 'n' {
+                                return AppState::NewContainer;
                             }
                             else if r >= '0' && r <= '9' {
                                 self.current_selection.push(r);
