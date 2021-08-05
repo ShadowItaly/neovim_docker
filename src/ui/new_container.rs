@@ -12,7 +12,6 @@ use termion::event::Key;
 use termion::input::TermRead;
 use crate::ui::AppState;
 use crate::VERSION;
-use tar::Builder;
 use home;
 use crate::ui::popup;
 
@@ -271,51 +270,29 @@ impl AppNewContainerContext {
                         },
                         CurrentPhase::WorkingDirectory => {
                             if r == '\n' {
-                                let mut activate_copy = String::new();
                                 //TODO: Write the copy code so that one can copy the current
                                 //working directory
                                 let timezone = format!("TZ={}",std::fs::read_to_string("/etc/timezone").unwrap().trim());
                                 let container_name = String::from("dde_")+&self.container_name;
-                                let mut outer_string = String::new();
-                                let volumes:Vec<&str> = match &self.working_dir {
+                                let mut volumes:Vec<String> = match &self.working_dir {
                                     WorkingDirectorySetup::MountDirectory(x) => {
-                                        outer_string=x.clone()+":/home/makepkg/mounted:Z";
-                                        vec![&outer_string]
+                                        let outer_string=x.clone()+":/home/makepkg/mounted:Z";
+                                        vec![outer_string]
                                     },
-                                    WorkingDirectorySetup::CopyDirectory(x) => {activate_copy = x.clone(); Vec::new()},
+                                    WorkingDirectorySetup::CopyDirectory(_) => {Vec::new()},
                                     _ => {Vec::new()}
                                 };
-                                let opts = ContainerOptions::builder(&self.image_name).auto_remove(self.auto_remove != "no").name(&container_name).cmd(self.entry_command.split(" ").collect()).tty(true).env(vec![&timezone]).attach_stdin(true).attach_stderr(true).attach_stdout(true).volumes(volumes).build();
-
-                                let info = docker.containers().create(&opts).await.unwrap();
-                                let container = info.id;
                                 if self.import_keys == "yes" {
-                                    let homed = home::home_dir().unwrap();
-                                    let buffer : Vec<u8> = Vec::new();
-                                    let mut ach = Builder::new(buffer);
-                                    ach.append_dir_all(".ssh",homed.join(".ssh")).unwrap();
-                                    let res = ach.into_inner().unwrap();
-                                    docker.containers().get(&container).copy_to(std::path::Path::new("/root/"), res.into()).await.unwrap();
+                                    let home_dir = home::home_dir().unwrap().join(".ssh").to_str().unwrap().to_string();
+                                    volumes.push(home_dir+":/home/makepkg/.ssh:Z");
                                 }
-                                
                                 if self.git_config == "yes" {
-                                    let homed = home::home_dir().unwrap();
-                                    let gitconfig = if homed.join(".gitconfig").exists() {
-                                        std::fs::read_to_string(homed.join(".gitconfig")).unwrap()
-                                    }
-                                    else if std::path::Path::new("/etc/gitconfig").exists() {
-                                        std::fs::read_to_string("/etc/gitconfig").unwrap()
-                                    }
-                                    else {
-                                        String::from("")
-                                    };
-                                    if gitconfig != "" {
-                                        docker.containers().get(&container).copy_file_into(std::path::Path::new("/root/.gitconfig"), gitconfig.as_bytes()).await.unwrap();
-                                    }
-                                    else {
-                                        popup::AppPopupContext::new("Could not import host git config into container!".to_owned()).event_loop(term);
-                                    }
+                                    let home_dir = home::home_dir().unwrap().join(".gitconfig").to_str().unwrap().to_string();
+                                    volumes.push(home_dir+":/home/makepkg/.gitconfig:Z");
                                 }
+                                let opts = ContainerOptions::builder(&self.image_name).auto_remove(self.auto_remove != "no").name(&container_name).cmd(self.entry_command.split(" ").collect()).tty(true).env(vec![&timezone]).attach_stdin(true).attach_stderr(true).attach_stdout(true).volumes(volumes.iter().map(|x| &x[..]).collect()).build();
+
+                                let _ = docker.containers().create(&opts).await.unwrap();
 
                                 return AppState::Search;
                             }
