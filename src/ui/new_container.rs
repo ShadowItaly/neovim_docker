@@ -272,12 +272,14 @@ impl AppNewContainerContext {
                         CurrentPhase::WorkingDirectory => {
                             if r == '\n' {
                                 let mut activate_copy = String::new();
+                                //TODO: Write the copy code so that one can copy the current
+                                //working directory
                                 let timezone = format!("TZ={}",std::fs::read_to_string("/etc/timezone").unwrap().trim());
                                 let container_name = String::from("dde_")+&self.container_name;
                                 let mut outer_string = String::new();
                                 let volumes:Vec<&str> = match &self.working_dir {
                                     WorkingDirectorySetup::MountDirectory(x) => {
-                                        outer_string=x.clone()+":/home/makepkg/mounted";
+                                        outer_string=x.clone()+":/home/makepkg/mounted:Z";
                                         vec![&outer_string]
                                     },
                                     WorkingDirectorySetup::CopyDirectory(x) => {activate_copy = x.clone(); Vec::new()},
