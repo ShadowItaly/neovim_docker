@@ -47,7 +47,7 @@ impl AppNewContainerContext {
         AppNewContainerContext { 
             container_name: String::new(),
             auto_remove: String::from("no"),
-            image_name: String::from("shadowitaly/neovim_arch"),
+            image_name: String::from("shadowitaly/neovim_arch:latest"),
             import_keys: String::from("yes"),
             git_config: String::from("yes"),
             entry_command: String::from("/bin/zsh"),
